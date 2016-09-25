@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>London Property Map</title>
+    <link href='http://fonts.googleapis.com/css?family=Roboto:400' rel='stylesheet' type='text/css'>
+	<link rel="stylesheet" href="css/redmond/jquery-ui-1.7.1.custom.css" type="text/css" />
+	<script type="text/javascript" src="js/jquery-1.3.2.min.js"></script>
+	<script type="text/javascript" src="js/jquery-ui-1.7.1.custom.min.js"></script>
+	<script type="text/javascript" src="js/selectToUISlider.jQuery.js"></script>
+	<link rel="Stylesheet" href="css/ui.slider.extras.css" type="text/css" />
+    <script type="text/javascript" src="js/d3.v3.min.js"></script>
+    <script type="text/javascript" src="js/queue.v1.min.js"></script>
+    <script type="text/javascript" src="js/topojson.v1.min.js"></script>
+<style>
+
+body {
+  padding-left: 10%;
+  font-size: 14px;
+  font-family: sans-serif;
+  background: #fff;
+}
+
+path {
+  stroke-width: 0.15px;
+  stroke: white;
+  fill: #eee;
+  cursor: pointer;
+}
+
+path:hover {
+  opacity: 1;
+  stroke-width: 1px;
+  stroke-linejoin: round;
+}
+
+svg {
+    background: #F6F6F6;
+}
+
+path.boroughs {
+  fill: none;
+  stroke: white;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+
+div.tooltip {
+  position: absolute;
+  background-color: #FFFFE0;
+  border: 1px;
+  color: black;
+  font-weight: normal;
+  padding: 4px 8px;
+  border-radius: 8px;
+  display: none;
+}
+
+fieldset { border:0;}	
+label {font-weight: normal; float: left; margin-right: 1em; font-size: 1em;}
+select {margin-right: 1em; float: left;}
+.ui-slider {clear: both; left: 1em}
+
+</style>
+</head>
+
+<body>
+<div id="datatitle"></div>
+<div id="chart"></div>
+<div class="radio-buttons" style="float:left">
+  <div class="btn-group"" data-toggle="buttons" align="justify">
+    <label class="btn btm-info active" onclick="update('Purchase_Count', selectedYear)">
+    <input name="button" 
+           type="radio" checked />Purchase Count
+    </label>
+    <label class="btn btm-info" onclick="update('Median_Price', selectedYear)">
+    <input name="button" 
+           type="radio" />Median Price
+    </label>
+    <label class="btn btm-info" onclick="update('Newbuild_Yes', selectedYear)">
+    <input name="button" 
+             type="radio" />Newbuild
+    </label>
+    <label class="btn btm-info" onclick="update('Type_Flats', selectedYear)">
+    <input name="button" 
+            type="radio" />Flats
+    </label>
+    <label class="btn btm-info" onclick="update('Type_Detached', selectedYear)">
+    <input name="button" 
+            type="radio" />Detached
+    </label>
+    <label class="btn btm-info" onclick="update('Type_Semi_Detached', selectedYear)">
+    <input name="button" 
+            type="radio" />Semi-Detached
+    </label>
+    <label class="btn btm-info" onclick="update('Type_Terraced', selectedYear)">
+    <input name="button" 
+            type="radio" />Terraced
+    </label>
+    <label class="btn btm-info" onclick="update('Freehold', selectedYear)">
+    <input name="button" 
+            type="radio" />Freehold
+    </label>
+    <label class="btn btm-info" onclick="update('Leasehold', selectedYear)">
+    <input name="button" 
+            type="radio" />Leasehold
+    </label>
+  </div>
+	<form action="#">
+		<fieldset>
+			<select name="year" id="year">
+				<option value="ALL" selected="selected">All years combined</option>
+				<option value="2009">2009</option>
+				<option value="2010">2010</option>
+				<option value="2011">2011</option>
+				<option value="2012">2012</option>
+				<option value="2013">2013</option>
+				<option value="2014">2014 (until May)</option>
+			</select>
+		</fieldset>
+    </form>
+<span>
+<p></p>
+<div style="color:#575757;padding:10px 0px 0px 0px;" align="center">Scroll to zoom. Double-click to reset to center. You can change values displayed on the maps with the above options.</div>
+<div style="color:#aaa;padding:10px 0px 0px 0px;font-size:12px;" align="center">Boundaries and data courtesy of ONS, prepared by Imperial College for the Summer Data Challenge. Tweet me at @thinh_ha.</div>
+</span>
+</div>
+<script>
+
+//Map dimensions (in pixels)
+var width = Math.min($("#chart").width(), 1000);
+    aspect = 600 / 1000;
+    height = 600;
+    
+//Create an SVG
+var svg = d3.select("#chart").append("svg")
+    .attr("preserveAspectRatio", "xMidYMid")
+    .attr("viewBox", "0 0 1000 600")
+    .attr("width", width)
+    .attr("height", height)
+    .on("dblclick", clicked);
+
+$(window).resize(function() {
+    var width = Math.min($("#chart").width(), 1000);
+    svg.attr("width", width);
+    svg.attr("height", width * aspect)
+    features.transition()
+      .duration(100)
+      .attr('transform','translate(0,0)scale(1)');
+    zoom.scale(1);
+    zoom.translate([0,0]);
+})
+
+//Map projection
+var projection = d3.geo.mercator()
+    .scale(50000)
+    .center([-0.08815203292839052,51.48976644045659]) //projection center
+    .translate([width/2,height/2]); //translate to center the map in view
+
+//Generate paths based on projection
+var path = d3.geo.path()
+    .projection(projection);
+
+//Group for the map features
+var features = svg.append("g")
+    .attr("class","features");
+
+//Create zoom/pan listener
+//Change [1,Infinity] to adjust the min/max zoom scale
+var zoom = d3.behavior.zoom()
+    .scaleExtent([1, 4])
+    .on("zoom",zoomed);
+
+svg.call(zoom);
+
+// Reading map files and data
+queue()
+  .defer(d3.json, 'MSOA_2011_London_gen_MHW.topojson')
+  .defer(d3.json, 'London_Borough_Excluding_MHW.topojson')
+  .defer(d3.csv, 'summary_msoa11_y.csv')
+  .await(ready);
+
+//Create choropleth scale
+var color = d3.scale.threshold()
+  .range(['#1f5e6a','#2a8192','#89cfdd','#f9d8d2','#eb7c69','#e13b1e','#bc330a','#5b1905']);
+  //["#d53e4f","#f46d43","#fdae61","#fee08b","#e6f598","#abdda4","#66c2a5","#3288bd"].reverse()
+  //["#4575b4","#74add1","#abd9e9","#e0f3f8","#fee090","#fdae61","#f46d43","#d73027"]
+  //.range(d3.range(8).map(function(i) { return "q" + i + "-8"; }));
+
+function logRange(range, steps) {
+  var buckets = [];
+  var low = Math.log(range[0]);
+  var high = Math.log(range[1]);
+  var step = (high - low) / steps;
+  for (var i=1; i<steps; i++) {
+    buckets.push(d3.round(Math.exp(low + step * i)));
+  }
+  return buckets;
+}
+
+var feature = 'Purchase_Count';
+
+var title = d3.select("#datatitle").html(switchTitle(feature));
+//var info = d3.select("body").append("div").attr("id", "info").append("h3").attr("id", "data");
+
+var csvdata = {};
+  
+function ready(error, geodata, boroughdata, csv) {
+  if (error) return console.log(error); //unknown error, check the console
+
+  csv.forEach(function(d) {
+      if (typeof csvdata[d.MSOA11CD] != 'object') {
+          csvdata[d.MSOA11CD] = {};
+      }
+      csvdata[d.MSOA11CD][d.Year] = {
+        Purchase_Count: +d.Count,
+        Mean_Price: +d.Mean_Price,
+        Median_Price: +d.Median_Price,
+        Type_Detached: +d.Type_Detached,
+        Type_Semi_Detached: +d.Type_Semi_Detached,
+        Type_Terraced: +d.Type_Terraced,
+        Type_Flats: +d.Type_Flats,
+        Newbuild_Yes: +d.Newbuild_Yes,
+        Newbuild_No: +d.Newbuild_No,
+        Freehold: +d.Freehold,
+        Leasehold: +d.Leasehold
+      };
+  });
+
+   
+  var domain = [];
+
+  var minmax = d3.extent(Object.keys(csvdata).map(function(key) {return csvdata[key]['ALL'][feature];})); 
+  if (minmax[1] - minmax[0] > 100000) {
+    domain = logRange(minmax, 8);
+  } else {
+    domain = [];
+    var step = (minmax[1] - minmax[0]) / 8;
+    for (var i=1; i<8; i++) {
+      domain.push(d3.round(minmax[0] + step * i));
+    }
+  }
+  color.domain(domain);
+  
+  //Create a path for each map feature in the data
+  features.selectAll("path")
+    .data(topojson.feature(geodata,geodata.objects.collection).features) //generate features from TopoJSON
+    .enter()
+    .append("path")
+    .attr("d",path)
+    .style("fill", function(d) { return ((typeof color(csvdata[d.properties.MSOA11CD]['ALL'][feature]) == "string" || csvdata[d.properties.MSOA11CD]['ALL'][feature] !== 0) ? color(csvdata[d.properties.MSOA11CD]['ALL'][feature]) : "#eee"); })
+    .style('opacity', 0.9)
+    .on("mouseover", function(d) {
+        showTooltip(d, feature, 'ALL');
+        //var name = '' + feature + ': ' + csvdata[d.properties.MSOA11CD][feature];
+		    //info.html(name);
+    })
+    .on("mousemove", moveTooltip)
+    .on("mouseout", function(d) {
+        hideTooltip(d);
+    });
+
+  features.append("path")
+    .datum(topojson.mesh(boroughdata, boroughdata.objects.collection, function(a, b) { return a !==b; }))
+    .attr("class", "boroughs")
+    .attr("d", path);
+
+  //legend
+  var legend = svg.selectAll("g.legend")
+  .data(domain)
+  .enter().append("g")
+  .attr("class", "legend");
+
+  var ls_w = 20, ls_h = 20;
+
+  legend.append("rect")
+  .attr("x", 20)
+  .attr("y", function(d, i){ return height - (i*ls_h) - 2*ls_h;})
+  .attr("width", ls_w)
+  .attr("height", ls_h)
+  .style("fill", function(d, i) { return color(d); })
+  .style("opacity", 0.8);
+
+  legend.append("text")
+  .attr("class", "legend-text")
+  .attr("x", 50)
+  .attr("y", function(d, i){ return height - (i*ls_h) - ls_h - 4;})
+  .text(function(d){ return d + '+'; });
+
+};
+
+var selectedFeature = feature;
+
+function update(feature, year) {
+
+  selectedFeature = feature;
+
+  d3.json('MSOA_2011_London_gen_MHW.topojson', function(error, geodata) {
+    if (error) return console.log(error); //unknown error, check the console
+
+    var domain = [];
+
+    if (year != 'ALL') {
+      var list = [];
+      var yrs = ['2009', '2010', '2011', '2012', '2013', '2014'];
+      for (i in yrs) {
+        list = list.concat(Object.keys(csvdata).map(function(key) {return csvdata[key][yrs[i]][feature];}))
+      }
+      var minmax = d3.extent(d3.extent(list.filter(function(d) {if (d>0){return d}})));
+    } else {
+      var minmax = d3.extent(Object.keys(csvdata).map(function(key) {return csvdata[key]['ALL'][feature];}));
+    }
+    if (minmax[1] - minmax[0] > 100000) {
+      domain = logRange(minmax, 8);
+    } else {
+      domain = [];
+      var step = (minmax[1] - minmax[0]) / 8;
+      for (var i=1; i<8; i++) {
+        domain.push(d3.round(minmax[0] + step * i));
+      }
+    }
+    color.domain(domain);
+    
+    title.html(switchTitle(feature))
+
+    //Create a path for each map feature in the data
+    features.selectAll("path")
+      .data(topojson.feature(geodata,geodata.objects.collection).features) //generate features from TopoJSON
+      .style("fill", function(d) { return (typeof color(csvdata[d.properties.MSOA11CD][year][feature]) == "string" ? color(csvdata[d.properties.MSOA11CD][year][feature]) : "#eee"); })
+      .on("mouseover", function(d) {
+          showTooltip(d, feature, year);
+          //var name = '' + feature + ': ' + csvdata[d.properties.MSOA11CD][feature];
+		  //info.html(name);
+      })
+      .on("mousemove", moveTooltip)
+      .on("mouseout", function(d) {
+          hideTooltip(d);
+      })
+      .style('opacity', 0.9)
+      .transition()
+      .duration(200);
+
+    //legend
+    var ls_w = 20, ls_h = 20;
+     
+    svg.selectAll(".legend-text")
+    .data(domain)
+    .transition()
+    .duration(200)
+    .text(function(d) { return d + '+'; });
+  })
+}
+
+
+// Changes Title and descriptions based on the button that was pressed
+function switchTitle(feature) {
+    // Implement Python style string formatting
+    String.prototype.format = function () {
+      var i = 0, args = arguments;
+      return this.replace(/{}/g, function () {
+        return typeof args[i] != 'undefined' ? args[i++] : '';
+      });
+    };
+    var base = '<h2>{}</h2><p>{}</p>'
+    switch(feature) {
+      case "Purchase_Count":
+        return base.format('London Property Data: Purchase Count', 'Shows the number of property purchases made in each London area. Hover for data, scroll to zoom, and doubleclick to reset to centre.');
+        break;
+      case "Median_Price":
+        return base.format('London Property Data: Median Price', 'Shows the median price (in GBP) of all property purchases made in each London area. Prices on legend follow an exponentially increasing scale.');
+        break;
+      case "Type_Detached":
+        return base.format('London Property Data: Property Type - Detached', 'Shows the number of detached property purchases in each London area. Legends in year views are kept constant.');
+        break;
+      case "Type_Semi_Detached":
+        return base.format('London Property Data: Property Type - Semi-Detached', 'Shows the number of semi-detached property purchases in each London area. In year view, legend shows the range of values in the whole 6 years.');
+        break;
+      case "Type_Terraced":
+        return base.format('London Property Data: Property Type - Terraced', 'Shows the number of purchased terraced property in each London area.');
+        break;
+      case "Type_Flats":
+        return base.format('London Property Data: Property Type - Flats', 'Shows the number of purchased flat properties in each London area. Try sliding on the years to see how values change across time.');
+        break;
+      case "Newbuild_Yes":
+        return base.format('London Property Data: Newbuilds', 'Shows the number of newly build properties purchased in each London area. Legends reflect the range of the selected values.');
+        break;
+      case "Leasehold":
+        return base.format('London Property Data: Leasehold', 'Shows the number of leasehold properties purchased in each London area.');
+        break;
+      case "Freehold":
+        return base.format('London Property Data: Freehold', 'Shows the number of freehold properties purchased in each London area.');
+        break;
+      default: return d.properties.POPDEN;  
+    }
+}
+
+
+// Add optional onClick events for features here
+// d.properties contains the attributes (e.g. d.properties.name, d.properties.population)
+function clicked(d,i) {
+  features.transition()
+    .duration(1000)
+    .attr('transform','translate(0,0)scale(1)');
+  zoom.scale(1);
+  zoom.translate([0,0]);
+}
+
+
+//Update map on zoom/pan
+function zoomed() {
+  features.attr("transform", "translate(" + zoom.translate() + ")scale(" + zoom.scale() + ")")
+    .selectAll("path").style("stroke-width", 0.15 / zoom.scale() + "px" )
+  features.select(".boroughs").style("stroke-width", 2.0 / zoom.scale() + "px" );
+}
+
+//Create a tooltip, hidden at the start
+var tooltip = d3.select("body").append("div").attr("class","tooltip");
+
+//Position of the tooltip relative to the cursor
+var tooltipOffset = {x: 10, y: 10};
+
+//Create a tooltip, hidden at the start
+function showTooltip(d, f, year) {
+  moveTooltip();
+
+  tooltip.style("display","block")
+      .html("<b>" + d.properties.MSOA11NM + '   | Year: ' + year + "</b><br>" +
+            f + ": " + csvdata[d.properties.MSOA11CD][year][f]);
+}
+
+
+//Move the tooltip to track the mouse
+function moveTooltip() {
+  tooltip
+      .style("top",(d3.event.pageY+tooltipOffset.y)+"px")
+      .style("left",(d3.event.pageX+tooltipOffset.x)+"px");
+}
+
+//Create a tooltip, hidden at the start
+function hideTooltip() {
+  tooltip.style("display","none");
+}
+
+var years = ['ALL', '2009', '2010', '2011', '2012', '2013', '2014'];
+var selectedYear = 'ALL';
+
+$(function(){
+	var abc = $('select#year').selectToUISlider({
+	  labels: 8,
+	  sliderOptions:{
+	    change: function(e, ui) {
+	      selectedYear = years[ui.value];
+	      update(selectedFeature, selectedYear);
+	    }
+	  }
+	}).hide();
+
+});
+</script>
+</body>
+</html>
